@@ -1,0 +1,225 @@
+<html>
+<head>
+	<title>Bell Scheduler</title>
+	<script src="wavesurfer.min.js"></script>
+</head>
+<body>
+	<div id="holder" style="font-family: Segoe UI, Roboto, sans-serif;">Next Bell Is</div>
+	<div id="status" style="font-family: Segoe UI, Roboto, sans-serif;"></div>
+	
+	<div id="waveform" style="margin-top: 100px;"></div>
+	<script>
+		const electron = require('electron');
+		const {ipcRenderer} = electron;
+		const path = require('path');
+		const url = require('url');
+
+		let os = require('os');
+		
+		const bellSched = {
+			'7520': '7:52:0',
+			'7550': '7:55:0',
+			'800': '8:0:0',
+			'11300': '11:30:0',
+			'1200': '12:0:0',
+			'12250': '12:25:0',
+			'12300': '12:30:0',
+			'12550': '12:55:0',
+			'1300': '13:0:0',
+			'1500': '15:0:0',
+			'16300': '16:30:0',
+			'16550': '16:55:0',
+			'1700': '17:0:0'/*,
+			'17550': '17:55:0',
+			'1800': '18:0:0' */
+		};
+
+		const bell = [
+			'7520',
+			'7550',
+			'800',
+			'11300',
+			'1200',
+			'12250',
+			'12300',
+			'12550',
+			'1300',
+			'1500',
+			'16300',
+			'16550',
+			'1700'/*,
+			'17550',
+			'1800' */
+		];
+		
+		// On Load
+		ipcRenderer.on('asynchronous-onload-reply', (event, arg) => {
+			if (arg.onload && arg.next != '') {			
+				let nextBell = getNextBellAfterOnLoadAndReload();
+				document.getElementById('holder').innerHTML = 'Next Bell Is '+nextBell;
+			}
+		});
+		ipcRenderer.send('asynchronous-onload-message', 'Renderer To Main Process');
+		
+		// Running
+		ipcRenderer.on('asynchronous-reply', (event, arg) => {
+			if (arg.currentBell != '') {
+				document.getElementById('holder').innerHTML = 'Next Bell Is '+arg.nextBell;
+				playWav(arg.currentBell);
+			}
+		});
+		ipcRenderer.send('asynchronous-message', 'Renderer To Main Process');
+		
+		// If Running do not execute the reload
+		// Reload
+		ipcRenderer.on('asynchronous-reload-reply', (event, data) => {
+			if (data.reload) {
+				let nextBell = getNextBellAfterOnLoadAndReload();
+				document.getElementById('holder').innerHTML = 'Next Bell Is '+nextBell;
+			}
+		});
+		ipcRenderer.send('asynchronous-reload-message', 'Renderer To Main Process');
+		
+		// Play/Stop
+		ipcRenderer.on('status-reply', (event, arg) => {
+			document.getElementById('status').innerHTML = arg;
+		});
+		ipcRenderer.send('status-message', 'Renderer To Main Process');
+		
+		function playWav(currentBell) {
+			let date = new Date();
+			let hours = date.getHours();
+			let minutes = date.getMinutes();
+			let seconds = date.getSeconds();
+			
+			if (currentBell != hours+"_"+minutes) {
+			  	return;
+			}
+
+			if (currentBell == hours+"_"+minutes) {
+				// After 3 seconds do not play again the wav
+				if (seconds >= 3) {
+					return;
+				}
+			}
+
+			let wav = url.format({
+				pathname: path.join(__dirname, 'wav'+path.sep+currentBell+'.wav'),
+				// pathname: path.join(__dirname, 'wav'+path.sep+'8_0.wav'), // Testing Only
+				protocol: 'file:',
+				slashes: true
+			});
+			
+			/* new Audio(wav).play().then().catch(ex => {
+				document.body.innerHTML = ex; 
+			}); */
+			
+			// Insert wave
+			let wavesurfer = WaveSurfer.create({
+				container: '#waveform',
+				interact: false/*,
+				barWidth: 5*/
+			});
+			wavesurfer.load(wav);
+			
+			wavesurfer.on('ready', function() {
+				wavesurfer.play();
+			});
+			
+			wavesurfer.on('finish', function() {
+				wavesurfer.empty();
+				wavesurfer.destroy();
+			});
+		}
+		
+		function nextBellIs(currentTime) {
+			let nextBell = 0;
+			for (var i = 0; i < bell.length; i++) {
+				if (bell[i] == currentTime) {
+					nextBell = bell[i + 1];
+
+					break;
+				}
+			}
+
+			return (typeof nextBell == 'undefined') ? bell[0] : nextBell;
+		}
+
+		function getNextBellAfterOnLoadAndReload() {
+			let d = new Date();
+			let h = d.getHours();
+			let m = d.getMinutes();
+			let s = d.getSeconds();
+			let ms = d.getMilliseconds();
+			let nextBell = bellSched['7520'];
+			// Note: The seconds is not yet considered only the minutes
+			
+			let eq = [];
+			for (let i = 0; i < bell.length; i++) {
+				let t = bellSched[bell[i]];
+				
+				if (parseInt(t.toString().split(':')[0]) < h) {
+					continue;
+				}
+				
+				eq.push(bell[i]);
+			}
+			
+			let ss = false;
+			for (let i = 0; i < eq.length; i++) {
+				let t = bellSched[eq[i]];
+				if (h == parseInt(t.toString().split(':')[0])) {
+					ss = true;
+					break;
+				}
+			}
+			
+			// Consider the undefined
+			if (! ss) {
+				if (typeof bellSched[eq[0]] != 'undefined') {
+					nextBell = bellSched[eq[0]];
+				}
+			} else {
+				let trimmed = [];
+				for (let i = 0; i < eq.length; i++) {
+					let t = bellSched[eq[i]].toString().split(':')[0];			
+					if (h == parseInt(t)) {
+						trimmed.push(eq[i]);
+					}
+				}
+				
+				if (trimmed.length == 1) {
+					nextBell = bellSched[nextBellIs(trimmed[0])];
+				} else {
+					// Compare the minutes
+					
+					// Time is 4:59 PM 
+					// Result with 16:30 PM, 16:55 PM
+					let tt = [];
+					let greater = [];
+					for (let i = 0; i < trimmed.length; i++) {
+						let time = bellSched[trimmed[i]];
+						let min = time.toString().split(':')[1];
+						
+						if (m > parseInt(min)) {
+							greater.push(trimmed[i]);
+						} else {
+							tt.push(trimmed[i]);
+							break;
+						}
+					}
+					
+					if (tt.length == 0) {
+						// Get the last index
+						nextBell = bellSched[nextBellIs(greater[greater.length - 1])];
+					} else {
+						nextBell = bellSched[tt];
+					}
+				}
+			}
+			
+			return nextBell;
+		}
+	</script>
+</body>
+</html>

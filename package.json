@@ -1,0 +1,17 @@
+{
+  "name": "Bell",
+  "version": "1.0.0",
+  "description": "Bell Scheduler",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "Dave Tolentin",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^4.1.3"
+  },
+  "dependencies": {
+    "electron-packager": "^13.1.1"
+  }
+}
